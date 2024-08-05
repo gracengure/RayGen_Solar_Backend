@@ -10,7 +10,7 @@ with app.app_context():
     users = [
         User(fullname="Alice Smith", email="alice@example.com", password="password123", role="customer", phone_number="1234567890"),
         User(fullname="Bob Johnson", email="bob@example.com", password="password123", role="admin", phone_number="0987654321"),
-        User(fullname="Charlie Brown", email="charlie@example.com", password="password123", role="customer"),
+        User(fullname="Charlie Brown", email="charlie@example.com", password="password123", role="customer", phone_number="0797853350"),
     ]
 
     products = [
