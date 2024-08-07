@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
+
 import os
-from datetime import date
+import resend
+import random
+from datetime import date,timedelta
 from flask import Flask, request, make_response, jsonify
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -8,6 +11,10 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from functools import wraps
 from models import db, User, Product, Order, Review
+
+# from dotenv import load_dotenv
+from flask_mail import Mail, Message
+
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DATABASE = os.environ.get("DB_URI", f"sqlite:///{os.path.join(BASE_DIR, 'solar_website.db')}")
@@ -23,6 +30,16 @@ bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 db.init_app(app)
 
+# load_dotenv()
+
+app.config['MAIL_SERVER']='sandbox.smtp.mailtrap.io'
+app.config['MAIL_PORT'] = 2525
+app.config['MAIL_USERNAME'] = 'cc6618a4c2436c'
+app.config['MAIL_PASSWORD'] = '8578432f236d9f'
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False
+mail = Mail(app)
+# resend.api_key = os.environ.get("RESEND_API_KEY")
 # Decorator for Admin Access
 def admin_required(fn):
     @wraps(fn)
@@ -36,6 +53,22 @@ def admin_required(fn):
             return jsonify({"error": "Admin access required"}), 403
         return fn(*args, **kwargs)
     return wrapper
+
+def generate_verification_code():
+    return f"{random.randint(100000, 999999)}"
+
+def send_email_verification(email, token):
+    msg = Message(
+        "Please verify your email",
+        sender="onesmusmwai40@gmail.com",  
+        recipients=[email]
+    )
+    msg.body = f"Your verification code is: {token}. Please use this code to verify your email address."
+    try:
+        mail.send(msg)
+        print(f"Verification email sent to {email}.")
+    except Exception as e:
+        print(f"Failed to send email to {email}: {e}")
 
 
 @app.route("/")
@@ -281,19 +314,16 @@ def login_user_email():
     data = request.get_json()
     email = data.get("email")
     password = data.get("password")
+    remember_me = data.get("remember_me", False)
     
     user = User.query.filter_by(email=email).first()
     
     if user and bcrypt.check_password_hash(user.password, password):
-        token = create_access_token(identity=user.id)
-        user.token = token
-        db.session.commit()
-        
-        return jsonify({"token": user.token, "role": user.role, "success": True}), 200
+        expires = timedelta(days=30) if remember_me else timedelta(hours=1)
+        token = create_access_token(identity=user.id, expires_delta=expires)
+        return jsonify({"token": token, "role": user.role, "success": True}), 200
     else:
         return jsonify({"error": "Invalid email or password"}), 401
-    
-
 @app.route("/login/phone", methods=["POST"])
 def login_user_phone():
     data = request.get_json()
@@ -329,10 +359,117 @@ def get_all_reviews():
         response = make_response(jsonify({"error": "Internal Server Error"}), 500)
         return response
 
-@app.route("/reviews/<int:review_id>", methods=["GET"])
-def get_review(review_id):
-    review = Review.query.get_or_404(review_id)
-    response = make_response(jsonify(review.to_dict()), 200)
+@app.route("/products/<int:product_id>/reviews", methods=["GET"])
+def get_product_reviews(product_id):
+    reviews = db.session.query(Review, User.name).join(User, Review.user_id == User.id).filter(Review.product_id == product_id).all()
+    response_data = [
+        {
+            "id": review.id,
+            "user_id": review.user_id,
+            "user_name": user_name,
+            "product_id": review.product_id,
+            "comments": review.comments,
+            "rating": review.rating,
+            "review_date": review.review_date.strftime('%Y-%m-%d')
+        }
+        for review, user_name in reviews
+    ]
+    response = make_response(jsonify(response_data), 200)
     return response
-if __name__ == "__main__":
+@app.route("/signup", methods=["POST"])
+def signup():
+    data = request.get_json()
+    existing_user = User.query.filter_by(email=data["email"]).first()
+    if existing_user:
+        return jsonify({"error": "Email already exists"}), 422
+
+    hashed_password = bcrypt.generate_password_hash(data["password"]).decode("utf-8")
+    verification_code = generate_verification_code()
+    new_user = User(
+        name=data["name"],
+        email=data["email"],
+        password=hashed_password,
+        role=data.get("role", "customer"),
+        phone_number=data["phone_number"],
+        verification_code=verification_code,
+        is_verified=False, 
+    )
+    db.session.add(new_user)
+    db.session.commit()
+
+    try:
+        send_email_verification(data["email"], verification_code)
+        return jsonify({"message": "User created successfully. Please check your email for the verification code."}), 201
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error sending verification email: {e}")
+        return jsonify({"error": "Failed to send verification email"}), 500
+    
+@app.route("/verify", methods=["POST"])
+def verify_email():
+    data = request.get_json()
+    email = data.get("email")
+    code = data.get("code")
+
+    user = User.query.filter_by(email=email, verification_code=code).first()
+    if user:
+        user.is_verified = True
+        user.verification_code = None  
+        db.session.commit()
+        return jsonify({"message": "Email verified successfully."}), 200
+    else:
+        return jsonify({"error": "Invalid verification code or email."}), 400
+
+
+@app.route("/reviews", methods=["POST"])
+def create_review():
+    data = request.get_json()
+    
+    # Ensure the required fields are present
+    if not all(key in data for key in ("user_id", "product_id", "comments", "rating")):
+        return make_response(jsonify({"error": "Missing required fields"}), 400)
+    
+    # Create a new review instance
+    new_review = Review(
+        user_id=data["user_id"],
+        product_id=data["product_id"],
+        comments=data["comments"],
+        rating=data["rating"],
+        review_date=date.today()  # Or use data.get("review_date") if you want to accept date from request
+    )
+    
+    # Add and commit the new review to the database
+    db.session.add(new_review)
+    db.session.commit()
+    
+    # Return the newly created review's ID as part of the response
+    response = make_response(jsonify(new_review_id=new_review.id), 201)
+    return response
+@app.route('/reviews/<int:review_id>', methods=['DELETE'])
+def delete_review(review_id):
+    review = Review.query.get_or_404(review_id)
+    db.session.delete(review)
+    db.session.commit()
+    return jsonify({'message': 'Review deleted successfully'}), 200
+@app.route("/user/profile", methods=["GET"])
+@jwt_required()
+def user_profile():
+    user_id = get_jwt_identity()
+    user = User.query.get_or_404(user_id)
+    response = make_response(
+        jsonify(
+            {
+                "user_id": user.id,
+                "name": user.name,
+                "email": user.email,
+                "phone_number": user.phone_number,
+                "role": user.role
+            }
+        ),
+        200,
+    )
+    return response
+
+
+if __name__ == "_main_":
     app.run(debug=True, port=5000)
