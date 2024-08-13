@@ -18,6 +18,8 @@ import requests
 from requests.auth import HTTPBasicAuth
 import base64
 import json
+from flask_mail import Message
+from flask import render_template_string
 
 # from dotenv import load_dotenv
 from flask_mail import Mail, Message
@@ -57,7 +59,7 @@ db.init_app(app)
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USERNAME'] = 'charitywanjiku8245@gmail.com'
-app.config['MAIL_PASSWORD'] = 'tfig yggf lyao mbav' 
+app.config['MAIL_PASSWORD'] = 'zmcs hkrq ohze xcxt' 
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
 mail = Mail(app)
@@ -82,10 +84,21 @@ def generate_verification_code():
 def send_email_verification(email, token):
     msg = Message(
         "Please verify your email",
-        sender="onesmusmwai40@gmail.com",  
+        sender="charitywanjiku8245@gmail.com",  
         recipients=[email]
     )
+    
+    # Create HTML content with the token in bold
+    html_body = render_template_string(
+        f"""
+        <p>Your verification code is: <strong>{token}</strong>.</p>
+        <p>Please use this code to verify your email address.</p>
+        """
+    )
+    
     msg.body = f"Your verification code is: {token}. Please use this code to verify your email address."
+    msg.html = html_body
+    
     try:
         mail.send(msg)
         print(f"Verification email sent to {email}.")
