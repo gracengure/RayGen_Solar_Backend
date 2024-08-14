@@ -10,7 +10,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flask_migrate import Migrate
 from flask_cors import CORS
 from functools import wraps
-from models import db, User, Product, Order, Review
+from models import db, User, Product, Order, Review,OrderStatus,OrderProduct
 from flask import Flask
 from flask_restful import Api, Resource, reqparse
 import datetime
@@ -106,6 +106,7 @@ def send_email_verification(email, token):
         print(f"Failed to send email to {email}: {e}")
 
 
+
 @app.route("/")
 def index():
     return "<h1>RayGen Solar Solutions</h1>"
@@ -175,22 +176,7 @@ def update_user(user_id):
     response = make_response(jsonify(message="User updated successfully"), 200)
     return response
 
-@app.route("/users/<int:user_id>", methods=["GET"])
-@admin_required
-def get_user(user_id):
-    user = User.query.get_or_404(user_id)
-    response = make_response(
-        jsonify(
-            {
-                "user_id": user.id,
-                "name": user.name,
-                "email": user.email,
-                "role": user.role,
-            }
-        ),
-        200,
-    )
-    return response
+
 
 @app.route("/users/<int:user_id>", methods=["DELETE"])
 @admin_required
@@ -208,7 +194,7 @@ def create_product():
     print(data)  # Log incoming data
     new_product = Product(
         name=data["name"],
-        image_url=data["iamge_url"],
+       
         price=data["price"],
         
         category=data["category"],
@@ -291,29 +277,51 @@ def get_product_category():
     else:
         return jsonify({'error': 'Category not specified'}), 400
 
+@app.route('/api/products/total', methods=['GET'])
+def get_total_products():
+    try:
+        # Fetch total number of products
+        total = Product.query.count()
+        return jsonify({'total': total}), 200
+    except Exception as e:
+        # Log the error for debugging
+        app.logger.error(f"Error fetching total products: {e}")
+        return jsonify({'error': 'An error occurred while fetching the total number of products'}), 500
 
+ 
+@app.route("/orders", methods=["GET"])
+@admin_required
+def get_orders():
+    try:
+        # Query the database to get all orders
+        orders = Order.query.all()
+        
+        # Convert orders to a list of dictionaries, now including customer name
+        orders_list = [order.to_dict() for order in orders]
+        
+        # Prepare the response
+        response = jsonify(orders_list)
+        return response
+    except Exception as e:
+        # Handle exceptions and return an error response
+        print(f"Error retrieving orders: {e}")
+        response = jsonify({"error": "An error occurred while retrieving orders."})
+        return response, 500
 
-@app.route("/orders", methods=["POST"])
-
-def create_order():
-    data = request.get_json()
-    new_order = Order(
-        user_id=data["user_id"],
-        order_date=date.today(),
-        total_price=data["total_price"],
-    )
-    db.session.add(new_order)
-    db.session.commit()
-    response = make_response(jsonify(new_order_id=new_order.id), 201)
-    return response
 
 @app.route("/orders/<int:order_id>", methods=["GET"])
 @jwt_required()
 def get_order(order_id):
     user_id = get_jwt_identity()
-    order = Order.query.get_or_404(order_id)
-    if order.user_id != user_id:
+    user = User.query.get(user_id)
+
+    # Check if the user is an admin
+    if user.role != "admin":
         return jsonify({"error": "Access denied"}), 403
+
+    # Retrieve the order regardless of the user_id
+    order = Order.query.get_or_404(order_id)
+
     response = make_response(
         jsonify(
             {
@@ -326,34 +334,83 @@ def get_order(order_id):
         200,
     )
     return response
+@app.route('/orders/status', methods=['GET'])
+def get_order_status():
+    order_status = request.args.get('status')  # Ensure 'status' matches the query parameter
+
+    if order_status:
+        orders = Order.query.filter_by(order_status=order_status).all()  # Use correct column name
+        return jsonify([order.to_dict() for order in orders]), 200
+    else:
+        return jsonify({'error': 'Status not specified'}), 400
 
 @app.route("/orders/<int:order_id>", methods=["PUT"])
-@admin_required
 def update_order(order_id):
-    data = request.get_json()
-    order = Order.query.get_or_404(order_id)
-    order.user_id = data["user_id"]
-    order.order_date = data["order_date"]
-    order.total_price = data["total_price"]
-    db.session.commit()
-    response = make_response(jsonify(message="Order updated successfully"), 200)
-    return response
+    try:
+        # Retrieve the order by ID
+        order = Order.query.get_or_404(order_id)
+
+        # Get JSON data from the request
+        data = request.json
+
+        # Update the order fields if they are provided in the request
+        if 'order_date' in data:
+            order.order_date = date.fromisoformat(data['order_date'])
+        if 'total_price' in data:
+            order.total_price = data['total_price']
+        if 'order_status' in data:
+            try:
+                order.order_status = OrderStatus[data['order_status'].upper()]
+            except KeyError:
+                return jsonify({"error": "Invalid order status."}), 400
+        if 'delivery_date' in data:
+            order.delivery_date = date.fromisoformat(data['delivery_date']) if data['delivery_date'] else None
+
+        if 'order_products' in data:
+            # Assuming order_products is an array of product details
+            # Clear existing products
+            order.order_products.clear()
+            # Add new products
+            for op_data in data['order_products']:
+                # Assuming OrderProduct requires certain fields
+                product = OrderProduct(**op_data)
+                order.order_products.append(product)
+
+        # Save the updated order to the database
+        db.session.commit()
+
+        # Return the updated order as a JSON response
+        return jsonify(order.to_dict()), 200
+
+    except KeyError as e:
+        return jsonify({"error": f"Invalid key: {str(e)}"}), 400
+    except ValueError as e:
+        return jsonify({"error": f"Value error: {str(e)}"}), 400
+    except Exception as e:
+        print(f"Error updating order: {e}")
+        return jsonify({"error": "An error occurred while updating the order."}), 500
 
 @app.route("/orders/<int:order_id>", methods=["DELETE"])
-@jwt_required()
-def delete_order(order_id):
-    user_id = get_jwt_identity()
-    order = Order.query.get_or_404(order_id)
-    
-    if order.user_id != user_id:
-        user = User.query.get(user_id)
-        if user.role != 'admin':
-            return jsonify({"error": "Access denied"}), 403
 
-    db.session.delete(order)
-    db.session.commit()
-    response = make_response("", 204)
-    return response
+def delete_order(order_id):
+    try:
+        # Retrieve the order by ID
+        order = Order.query.get_or_404(order_id)
+        print(f"Attempting to delete order with ID: {order_id}")
+
+        # Delete the order
+        db.session.delete(order)
+        db.session.commit()
+        print(f"Order with ID: {order_id} has been deleted successfully.")
+
+        # Return a 204 No Content response
+        return make_response("", 204)
+    
+    except Exception as e:
+        # Log the error and return an error response
+        print(f"Error occurred while deleting order with ID: {order_id}: {e}")
+        db.session.rollback()
+        return make_response(jsonify({"error": "Order could not be deleted"}), 500)
 
 @app.route("/login/email", methods=["POST"])
 def login_user_email():
