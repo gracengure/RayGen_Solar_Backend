@@ -10,7 +10,16 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flask_migrate import Migrate
 from flask_cors import CORS
 from functools import wraps
-from models import db, User, Product, Order, Review
+from models import db, User, Product, Order, Review,OrderStatus,OrderProduct
+from flask import Flask
+from flask_restful import Api, Resource, reqparse
+import datetime
+import requests
+from requests.auth import HTTPBasicAuth
+import base64
+import json
+from flask_mail import Message
+from flask import render_template_string
 
 # from dotenv import load_dotenv
 from flask_mail import Mail, Message
@@ -19,7 +28,22 @@ from flask_mail import Mail, Message
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DATABASE = os.environ.get("DB_URI", f"sqlite:///{os.path.join(BASE_DIR, 'solar_website.db')}")
 
+def get_mpesa_token():
+
+    consumer_key = 'YXZhAOLvjYqmX7TkAirasXHJfTjUHHqQtIOAGXYTLjjVfvUK'
+    consumer_secret = 'c6SpWnqqHckfRGGGKQt56LKdwIDrMQXeHlGs9PEiSbfGLLAmnbUjc7niS8olHtJ2'
+
+    api_URL = "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials"
+
+    # make a get request using python requests liblary
+    r = requests.get(api_URL, auth=HTTPBasicAuth(consumer_key, consumer_secret))
+
+    # return access_token from response
+    return r.json()['access_token']
+
+
 app = Flask(__name__)
+api = Api(app)
 app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.json.compact = False
@@ -32,10 +56,10 @@ db.init_app(app)
 
 # load_dotenv()
 
-app.config['MAIL_SERVER']='sandbox.smtp.mailtrap.io'
-app.config['MAIL_PORT'] = 2525
-app.config['MAIL_USERNAME'] = 'cc6618a4c2436c'
-app.config['MAIL_PASSWORD'] = '8578432f236d9f'
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USERNAME'] = 'charitywanjiku8245@gmail.com'
+app.config['MAIL_PASSWORD'] = 'zmcs hkrq ohze xcxt' 
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
 mail = Mail(app)
@@ -60,15 +84,27 @@ def generate_verification_code():
 def send_email_verification(email, token):
     msg = Message(
         "Please verify your email",
-        sender="onesmusmwai40@gmail.com",  
+        sender="charitywanjiku8245@gmail.com",  
         recipients=[email]
     )
+    
+    # Create HTML content with the token in bold
+    html_body = render_template_string(
+        f"""
+        <p>Your verification code is: <strong>{token}</strong>.</p>
+        <p>Please use this code to verify your email address.</p>
+        """
+    )
+    
     msg.body = f"Your verification code is: {token}. Please use this code to verify your email address."
+    msg.html = html_body
+    
     try:
         mail.send(msg)
         print(f"Verification email sent to {email}.")
     except Exception as e:
         print(f"Failed to send email to {email}: {e}")
+
 
 
 @app.route("/")
@@ -120,7 +156,7 @@ def get_all_users():
         return response
 
 @app.route("/users/<int:user_id>", methods=["PUT"])
-@admin_required
+
 def update_user(user_id):
     data = request.get_json()
     user = User.query.get_or_404(user_id)
@@ -140,22 +176,7 @@ def update_user(user_id):
     response = make_response(jsonify(message="User updated successfully"), 200)
     return response
 
-@app.route("/users/<int:user_id>", methods=["GET"])
-@admin_required
-def get_user(user_id):
-    user = User.query.get_or_404(user_id)
-    response = make_response(
-        jsonify(
-            {
-                "user_id": user.id,
-                "name": user.name,
-                "email": user.email,
-                "role": user.role,
-            }
-        ),
-        200,
-    )
-    return response
+
 
 @app.route("/users/<int:user_id>", methods=["DELETE"])
 @admin_required
@@ -178,8 +199,7 @@ def create_product():
         
         category=data["category"],
         stock_quantity=data["stock_quantity"],
-        description=data["description"],
-        supplier=data["supplier"]
+        functionality =data["functionality"]
     )
     db.session.add(new_product)
     db.session.commit()
@@ -229,7 +249,7 @@ def update_product(product_id):
     data = request.get_json()
     product = Product.query.get_or_404(product_id)
     product.name = data["name"]
-  
+    product.image_url= data["image_url"]
     product.price = data["price"]
     product.category = data["category"]
     product.stock_quantity = data["stock_quantity"]
@@ -247,27 +267,61 @@ def delete_product(product_id):
     response = make_response("", 204)
     return response
 
-@app.route("/orders", methods=["POST"])
+@app.route('/products/category', methods=['GET'])
+def get_product_category():
+    category = request.args.get('category')
+    
+    if category:
+        products = Product.query.filter_by(category=category).all()
+        return jsonify([product.to_dict() for product in products]), 200
+    else:
+        return jsonify({'error': 'Category not specified'}), 400
 
-def create_order():
-    data = request.get_json()
-    new_order = Order(
-        user_id=data["user_id"],
-        order_date=date.today(),
-        total_price=data["total_price"],
-    )
-    db.session.add(new_order)
-    db.session.commit()
-    response = make_response(jsonify(new_order_id=new_order.id), 201)
-    return response
+@app.route('/api/products/total', methods=['GET'])
+def get_total_products():
+    try:
+        # Fetch total number of products
+        total = Product.query.count()
+        return jsonify({'total': total}), 200
+    except Exception as e:
+        # Log the error for debugging
+        app.logger.error(f"Error fetching total products: {e}")
+        return jsonify({'error': 'An error occurred while fetching the total number of products'}), 500
+
+ 
+@app.route("/orders", methods=["GET"])
+@admin_required
+def get_orders():
+    try:
+        # Query the database to get all orders
+        orders = Order.query.all()
+        
+        # Convert orders to a list of dictionaries, now including customer name
+        orders_list = [order.to_dict() for order in orders]
+        
+        # Prepare the response
+        response = jsonify(orders_list)
+        return response
+    except Exception as e:
+        # Handle exceptions and return an error response
+        print(f"Error retrieving orders: {e}")
+        response = jsonify({"error": "An error occurred while retrieving orders."})
+        return response, 500
+
 
 @app.route("/orders/<int:order_id>", methods=["GET"])
 @jwt_required()
 def get_order(order_id):
     user_id = get_jwt_identity()
-    order = Order.query.get_or_404(order_id)
-    if order.user_id != user_id:
+    user = User.query.get(user_id)
+
+    # Check if the user is an admin
+    if user.role != "admin":
         return jsonify({"error": "Access denied"}), 403
+
+    # Retrieve the order regardless of the user_id
+    order = Order.query.get_or_404(order_id)
+
     response = make_response(
         jsonify(
             {
@@ -280,34 +334,83 @@ def get_order(order_id):
         200,
     )
     return response
+@app.route('/orders/status', methods=['GET'])
+def get_order_status():
+    order_status = request.args.get('status')  # Ensure 'status' matches the query parameter
+
+    if order_status:
+        orders = Order.query.filter_by(order_status=order_status).all()  # Use correct column name
+        return jsonify([order.to_dict() for order in orders]), 200
+    else:
+        return jsonify({'error': 'Status not specified'}), 400
 
 @app.route("/orders/<int:order_id>", methods=["PUT"])
-@admin_required
 def update_order(order_id):
-    data = request.get_json()
-    order = Order.query.get_or_404(order_id)
-    order.user_id = data["user_id"]
-    order.order_date = data["order_date"]
-    order.total_price = data["total_price"]
-    db.session.commit()
-    response = make_response(jsonify(message="Order updated successfully"), 200)
-    return response
+    try:
+        # Retrieve the order by ID
+        order = Order.query.get_or_404(order_id)
+
+        # Get JSON data from the request
+        data = request.json
+
+        # Update the order fields if they are provided in the request
+        if 'order_date' in data:
+            order.order_date = date.fromisoformat(data['order_date'])
+        if 'total_price' in data:
+            order.total_price = data['total_price']
+        if 'order_status' in data:
+            try:
+                order.order_status = OrderStatus[data['order_status'].upper()]
+            except KeyError:
+                return jsonify({"error": "Invalid order status."}), 400
+        if 'delivery_date' in data:
+            order.delivery_date = date.fromisoformat(data['delivery_date']) if data['delivery_date'] else None
+
+        if 'order_products' in data:
+            # Assuming order_products is an array of product details
+            # Clear existing products
+            order.order_products.clear()
+            # Add new products
+            for op_data in data['order_products']:
+                # Assuming OrderProduct requires certain fields
+                product = OrderProduct(**op_data)
+                order.order_products.append(product)
+
+        # Save the updated order to the database
+        db.session.commit()
+
+        # Return the updated order as a JSON response
+        return jsonify(order.to_dict()), 200
+
+    except KeyError as e:
+        return jsonify({"error": f"Invalid key: {str(e)}"}), 400
+    except ValueError as e:
+        return jsonify({"error": f"Value error: {str(e)}"}), 400
+    except Exception as e:
+        print(f"Error updating order: {e}")
+        return jsonify({"error": "An error occurred while updating the order."}), 500
 
 @app.route("/orders/<int:order_id>", methods=["DELETE"])
-@jwt_required()
-def delete_order(order_id):
-    user_id = get_jwt_identity()
-    order = Order.query.get_or_404(order_id)
-    
-    if order.user_id != user_id:
-        user = User.query.get(user_id)
-        if user.role != 'admin':
-            return jsonify({"error": "Access denied"}), 403
 
-    db.session.delete(order)
-    db.session.commit()
-    response = make_response("", 204)
-    return response
+def delete_order(order_id):
+    try:
+        # Retrieve the order by ID
+        order = Order.query.get_or_404(order_id)
+        print(f"Attempting to delete order with ID: {order_id}")
+
+        # Delete the order
+        db.session.delete(order)
+        db.session.commit()
+        print(f"Order with ID: {order_id} has been deleted successfully.")
+
+        # Return a 204 No Content response
+        return make_response("", 204)
+    
+    except Exception as e:
+        # Log the error and return an error response
+        print(f"Error occurred while deleting order with ID: {order_id}: {e}")
+        db.session.rollback()
+        return make_response(jsonify({"error": "Order could not be deleted"}), 500)
 
 @app.route("/login/email", methods=["POST"])
 def login_user_email():
@@ -317,13 +420,20 @@ def login_user_email():
     remember_me = data.get("remember_me", False)
     
     user = User.query.filter_by(email=email).first()
+
+    if not user:
+        return jsonify({"error": "Invalid email or password"}), 401
     
-    if user and bcrypt.check_password_hash(user.password, password):
+    if not user.is_verified:
+        return jsonify({"error": "Please verify your email before logging in."}), 403
+
+    if bcrypt.check_password_hash(user.password, password):
         expires = timedelta(days=30) if remember_me else timedelta(hours=1)
         token = create_access_token(identity=user.id, expires_delta=expires)
         return jsonify({"token": token, "role": user.role, "success": True}), 200
     else:
         return jsonify({"error": "Invalid email or password"}), 401
+
 @app.route("/login/phone", methods=["POST"])
 def login_user_phone():
     data = request.get_json()
@@ -469,7 +579,144 @@ def user_profile():
         200,
     )
     return response
+@app.route('/user/profile/update', methods=['PUT'])
+@jwt_required()
+def update_profile():
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'message': 'No input data provided'}), 400
+
+    user = User.query.filter_by(id=current_user_id).first()
+
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    try:
+        user.name = data['name']
+        user.phone_number = data.get('phone', user.phone_number)
+        user.email = data['email']
+
+        db.session.commit()
+
+        return jsonify({'message': 'Profile updated successfully'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': f'Failed to update profile. Error: {str(e)}'}), 500
+@app.route('/user/change-password', methods=['PUT'])
+@jwt_required()
+def change_password():
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'message': 'No input data provided'}), 400
+
+    user = User.query.filter_by(id=current_user_id).first()
+
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    if not bcrypt.check_password_hash(user.password, data.get('currentPassword')):
+        return jsonify({'message': 'Current password is incorrect'}), 401
+
+    if data.get('newPassword') != data.get('confirmPassword'):
+        return jsonify({'message': 'Passwords do not match'}), 400
+
+    try:
+        user.password = bcrypt.generate_password_hash(data.get('newPassword')).decode('utf-8')
+        db.session.commit()
+
+        return jsonify({'message': 'Password changed successfully!'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': f'Failed to change password. Error: {str(e)}'}), 500
+def get_mpesa_token():
+
+    consumer_key = 'YXZhAOLvjYqmX7TkAirasXHJfTjUHHqQtIOAGXYTLjjVfvUK'
+    consumer_secret = 'c6SpWnqqHckfRGGGKQt56LKdwIDrMQXeHlGs9PEiSbfGLLAmnbUjc7niS8olHtJ2'
+
+    api_URL = "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials"
+
+    # make a get request using python requests liblary
+    r = requests.get(api_URL, auth=HTTPBasicAuth(consumer_key, consumer_secret))
+
+    # return access_token from response
+    return r.json()['access_token']
 
 
+class MakeSTKPush(Resource):
+    parser = reqparse.RequestParser()
+    parser.add_argument('phone', type=str, required=True, help="This field is required")
+    parser.add_argument('amount', type=str, required=True, help="This field is required")
+
+    def post(self):
+        """Make an STK push to Daraja API"""
+
+        data = MakeSTKPush.parser.parse_args()
+
+        # Construct the password using the required fields
+        business_shortcode = "174379"
+        online_passkey = "your_online_passkey"
+        current_timestamp = "20240811123456"  # You should generate this dynamically
+        password = base64.b64encode(f"{business_shortcode}{online_passkey}{current_timestamp}".encode()).decode()
+
+        try:
+            access_token = get_mpesa_token()
+
+            api_url = "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest"
+
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            }
+
+            request_data = {
+                "BusinessShortCode": business_shortcode,
+                "Password": password,
+                "Timestamp": current_timestamp,
+                "TransactionType": "CustomerPayBillOnline",
+                "Amount": data["amount"],
+                "PartyA": data["phone"],
+                "PartyB": business_shortcode,
+                "PhoneNumber": data["phone"],
+                "CallBackURL": "https://mydomain.com/pat",
+                "AccountReference": "Test",
+                "TransactionDesc": "Test"
+            }
+
+            response = requests.post(api_url, json=request_data, headers=headers)
+
+            if response.status_code > 299:
+                return {
+                    "success": False,
+                    "message": "Sorry, something went wrong please try again later."
+                }, 400
+            
+            response_data = json.loads(response.text)
+
+            if response_data["ResultCode"] == 0:
+                return {
+                    "success": True,
+                    "message": "Payment successful!"
+                }, 200
+            else:
+                return {
+                    "success": False,
+                    "message": "Payment failed or was cancelled."
+                }, 400
+
+        except Exception as e:
+            print(e)  # Log the exception for debugging
+            return {
+                "success": False,
+                "message": "Sorry something went wrong please try again."
+            }, 400
+
+if __name__ == "__main__":
+    app.run(debug=True)
 if __name__ == "_main_":
     app.run(debug=True, port=5000)
