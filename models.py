@@ -27,6 +27,7 @@ class User(db.Model, SerializerMixin):
     password = db.Column(db.String(150), nullable=False)
     role = db.Column(db.String(50), nullable=False, default='customer')
     phone_number = db.Column(db.String(15), nullable=True)
+    
     verification_code = db.Column(db.String(6), nullable=True)  # Adjust size as needed
     is_verified = db.Column(db.Boolean, default=False)
 
