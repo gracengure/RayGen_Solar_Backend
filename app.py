@@ -632,6 +632,9 @@ def change_password():
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': f'Failed to change password. Error: {str(e)}'}), 500
+
+
+
 def get_mpesa_token():
 
     consumer_key = 'YXZhAOLvjYqmX7TkAirasXHJfTjUHHqQtIOAGXYTLjjVfvUK'
@@ -727,7 +730,7 @@ class MakeSTKPush(Resource):
 
 
 # stk push path [POST request to {baseURL}/stkpush]
-api.add_resource(MakeSTKPush, "/stkpush")
+api.add_resource(MakeSTKPush, "/stkpush") 
 
 if __name__ == "_main_":
     app.run(debug=True, port=5000)
