@@ -130,7 +130,7 @@ class Order(db.Model, SerializerMixin):
         }
 
     @staticmethod
-    def calculate_delivery_date(order_date):
+    def calculate_delivery_date(order_date): 
         # Example: Set delivery date to 7 days after order_date
         delivery_date = order_date + timedelta(days=7)
         return delivery_date
