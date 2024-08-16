@@ -11,7 +11,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flask_migrate import Migrate
 from flask_cors import CORS
 from functools import wraps
-from models import db, User, Product, Order, Review ,OrderStatus
+from models import db, User, Product, Order, Review ,OrderStatus, Bird
 from flask import Flask
 from flask_restful import Api, Resource, reqparse
 import datetime
@@ -687,7 +687,61 @@ class MakeSTKPush(Resource):
             return {
                 "success": False,
                 "message": "Sorry something went wrong please try again."
-            }, 400
+            }, 400@app.route("/birds", methods=["POST"])
+@admin_required
+def create_bird():
+    data = request.get_json()
+    new_bird = Bird(
+        name=data["name"],
+        species=data["species"],
+        color=data.get("color"),
+        age=data.get("age")
+    )
+    db.session.add(new_bird)
+    db.session.commit()
+    response = make_response(jsonify(new_bird_id=new_bird.id), 201)
+    return response
+
+@app.route("/birds", methods=["GET"])
+def get_all_birds():
+    try:
+        birds = Bird.query.all()
+        response = make_response(
+            jsonify([bird.to_dict() for bird in birds]), 200
+        )
+        return response
+    except Exception as e:
+        print(f"Error fetching birds: {str(e)}")
+        response = make_response(jsonify({"error": "Internal Server Error"}), 500)
+        return response
+
+@app.route("/birds/<int:bird_id>", methods=["GET"])
+def get_bird(bird_id):
+    bird = Bird.query.get_or_404(bird_id)
+    response = make_response(jsonify(bird.to_dict()), 200)
+    return response
+
+@app.route("/birds/<int:bird_id>", methods=["PUT"])
+@admin_required
+def update_bird(bird_id):
+    data = request.get_json()
+    bird = Bird.query.get_or_404(bird_id)
+    bird.name = data.get("name", bird.name)
+    bird.species = data.get("species", bird.species)
+    bird.color = data.get("color", bird.color)
+    bird.age = data.get("age", bird.age)
+    db.session.commit()
+    response = make_response(jsonify(message="Bird updated successfully"), 200)
+    return response
+
+@app.route("/birds/<int:bird_id>", methods=["DELETE"])
+@admin_required
+def delete_bird(bird_id):
+    bird = Bird.query.get_or_404(bird_id)
+    db.session.delete(bird)
+    db.session.commit()
+    response = make_response("", 204)
+    return response
 
 
 # stk push path [POST request to {baseURL}/stkpush]
@@ -697,3 +751,4 @@ if __name__ == "__main__":
     app.run(debug=True)
 if __name__ == "_main_":
     app.run(debug=True, port=5000)
+    

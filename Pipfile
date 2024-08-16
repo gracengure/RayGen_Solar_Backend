@@ -13,6 +13,8 @@ flask-cors = "*"
 flask-jwt-extended = "*"
 flask-bcrypt = "*"
 sendgrid = "*"
+datetime = "*"
+flask-mail = "*"
 
 [dev-packages]
 
