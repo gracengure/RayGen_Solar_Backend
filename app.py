@@ -728,5 +728,22 @@ class MakeSTKPush(Resource):
 # stk push path [POST request to {baseURL}/stkpush]
 api.add_resource(MakeSTKPush, "/stkpush")
 
+
+@app.route('/products/search', methods=['GET'])
+def search_get_products():
+    query = request.args.get('name', '')
+    category = request.args.get('category', '')  # Get category from query parameters
+
+    # Filter products by name and category (if provided)
+    products_query = Product.query.filter(Product.name.ilike(f'%{query}%'))
+    
+    if category:
+        products_query = products_query.filter(Product.category.ilike(f'%{category}%'))
+
+    products = products_query.all()
+    
+    return jsonify([product.to_dict() for product in products])
+
+
 if __name__ == "_main_":
     app.run(debug=True, port=5000)
