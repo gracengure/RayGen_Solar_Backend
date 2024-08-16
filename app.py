@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-
 import os
+import resend
 import random
-from datetime import date,timedelta
+from datetime import date,timedelta 
 from flask import Flask, request, make_response, jsonify
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_migrate import Migrate
 from flask_cors import CORS
 from functools import wraps
-from models import db, User, Product, Order, Review,OrderStatus,OrderProduct
+from models import db, User, Product, Order, Review ,OrderStatus, Bird
 from flask import Flask
 from flask_restful import Api, Resource, reqparse
 import datetime
@@ -17,9 +17,9 @@ import requests
 from requests.auth import HTTPBasicAuth
 import base64
 import json
-from flask_mail import Message ,Mail
-from flask import render_template_string
 
+# from dotenv import load_dotenv
+from flask_mail import Mail, Message
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -53,10 +53,10 @@ db.init_app(app)
 
 # load_dotenv()
 
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USERNAME'] = 'charitywanjiku8245@gmail.com'
-app.config['MAIL_PASSWORD'] = 'zmcs hkrq ohze xcxt' 
+app.config['MAIL_SERVER']='sandbox.smtp.mailtrap.io'
+app.config['MAIL_PORT'] = 2525
+app.config['MAIL_USERNAME'] = 'cc6618a4c2436c'
+app.config['MAIL_PASSWORD'] = '8578432f236d9f'
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
 mail = Mail(app)
@@ -81,27 +81,15 @@ def generate_verification_code():
 def send_email_verification(email, token):
     msg = Message(
         "Please verify your email",
-        sender="charitywanjiku8245@gmail.com",  
+        sender="onesmusmwai40@gmail.com",  
         recipients=[email]
     )
-    
-    # Create HTML content with the token in bold
-    html_body = render_template_string(
-        f"""
-        <p>Your verification code is: <strong>{token}</strong>.</p>
-        <p>Please use this code to verify your email address.</p>
-        """
-    )
-    
     msg.body = f"Your verification code is: {token}. Please use this code to verify your email address."
-    msg.html = html_body
-    
     try:
         mail.send(msg)
         print(f"Verification email sent to {email}.")
     except Exception as e:
         print(f"Failed to send email to {email}: {e}")
-
 
 
 @app.route("/")
@@ -285,7 +273,34 @@ def get_total_products():
         app.logger.error(f"Error fetching total products: {e}")
         return jsonify({'error': 'An error occurred while fetching the total number of products'}), 500
 
- 
+@app.route("/orders", methods=["POST"])
+def create_order():
+    data = request.get_json()
+    
+    # Create a new Order instance
+    order_date = date.today()  # Use current date (without time)
+    delivery_date = Order.calculate_delivery_date(order_date)  # Calculate delivery date using only date
+    
+    # Print debug information (optional)
+    print(f"Order Date: {order_date}")
+    print(f"Calculated Delivery Date: {delivery_date}")
+
+    new_order = Order(
+        user_id=data["user_id"],
+        order_date=order_date,
+        total_price=data["total_price"],
+        order_status=OrderStatus.PENDING,  # Default status
+        delivery_date=delivery_date  # Calculate delivery date
+    )
+    
+    # Add the new order to the session and commit
+    db.session.add(new_order)
+    db.session.commit()
+    
+    # Prepare the response
+    response = make_response(jsonify(new_order_id=new_order.id), 201)
+    return response
+
 @app.route("/orders", methods=["GET"])
 @admin_required
 def get_orders():
@@ -293,7 +308,7 @@ def get_orders():
         # Query the database to get all orders
         orders = Order.query.all()
         
-        # Convert orders to a list of dictionaries, now including customer name
+        # Convert orders to a list of dictionaries
         orders_list = [order.to_dict() for order in orders]
         
         # Prepare the response
@@ -304,8 +319,6 @@ def get_orders():
         print(f"Error retrieving orders: {e}")
         response = jsonify({"error": "An error occurred while retrieving orders."})
         return response, 500
-
-
 @app.route("/orders/<int:order_id>", methods=["GET"])
 @jwt_required()
 def get_order(order_id):
@@ -331,83 +344,40 @@ def get_order(order_id):
         200,
     )
     return response
-@app.route('/orders/status', methods=['GET'])
-def get_order_status():
-    order_status = request.args.get('status')  # Ensure 'status' matches the query parameter
-
-    if order_status:
-        orders = Order.query.filter_by(order_status=order_status).all()  # Use correct column name
-        return jsonify([order.to_dict() for order in orders]), 200
-    else:
-        return jsonify({'error': 'Status not specified'}), 400
 
 @app.route("/orders/<int:order_id>", methods=["PUT"])
+@admin_required
 def update_order(order_id):
-    try:
-        # Retrieve the order by ID
-        order = Order.query.get_or_404(order_id)
+    data = request.get_json()
+    print(data)  # Debugging: Print the received data to the console
+    order = Order.query.get_or_404(order_id)
+    order.user_id = data["user_id"]
+    order.order_date = data["order_date"]
+    order.total_price = data["total_price"]
+    db.session.commit()
+    response = make_response(jsonify(message="Order updated successfully"), 200)
+    return response
 
-        # Get JSON data from the request
-        data = request.json
-
-        # Update the order fields if they are provided in the request
-        if 'order_date' in data:
-            order.order_date = date.fromisoformat(data['order_date'])
-        if 'total_price' in data:
-            order.total_price = data['total_price']
-        if 'order_status' in data:
-            try:
-                order.order_status = OrderStatus[data['order_status'].upper()]
-            except KeyError:
-                return jsonify({"error": "Invalid order status."}), 400
-        if 'delivery_date' in data:
-            order.delivery_date = date.fromisoformat(data['delivery_date']) if data['delivery_date'] else None
-
-        if 'order_products' in data:
-            # Assuming order_products is an array of product details
-            # Clear existing products
-            order.order_products.clear()
-            # Add new products
-            for op_data in data['order_products']:
-                # Assuming OrderProduct requires certain fields
-                product = OrderProduct(**op_data)
-                order.order_products.append(product)
-
-        # Save the updated order to the database
-        db.session.commit()
-
-        # Return the updated order as a JSON response
-        return jsonify(order.to_dict()), 200
-
-    except KeyError as e:
-        return jsonify({"error": f"Invalid key: {str(e)}"}), 400
-    except ValueError as e:
-        return jsonify({"error": f"Value error: {str(e)}"}), 400
-    except Exception as e:
-        print(f"Error updating order: {e}")
-        return jsonify({"error": "An error occurred while updating the order."}), 500
 
 @app.route("/orders/<int:order_id>", methods=["DELETE"])
-
+@jwt_required()
 def delete_order(order_id):
-    try:
-        # Retrieve the order by ID
-        order = Order.query.get_or_404(order_id)
-        print(f"Attempting to delete order with ID: {order_id}")
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
 
-        # Delete the order
-        db.session.delete(order)
-        db.session.commit()
-        print(f"Order with ID: {order_id} has been deleted successfully.")
+    # Check if the user is an admin
+    if user.role != 'admin':
+        return jsonify({"error": "Access denied"}), 403
 
-        # Return a 204 No Content response
-        return make_response("", 204)
+    # Retrieve the order and delete it
+    order = Order.query.get_or_404(order_id)
+
+    db.session.delete(order)
+    db.session.commit()
     
-    except Exception as e:
-        # Log the error and return an error response
-        print(f"Error occurred while deleting order with ID: {order_id}: {e}")
-        db.session.rollback()
-        return make_response(jsonify({"error": "Order could not be deleted"}), 500)
+    response = make_response("", 204)
+    return response
+
 
 @app.route("/login/email", methods=["POST"])
 def login_user_email():
@@ -417,20 +387,13 @@ def login_user_email():
     remember_me = data.get("remember_me", False)
     
     user = User.query.filter_by(email=email).first()
-
-    if not user:
-        return jsonify({"error": "Invalid email or password"}), 401
     
-    if not user.is_verified:
-        return jsonify({"error": "Please verify your email before logging in."}), 403
-
-    if bcrypt.check_password_hash(user.password, password):
+    if user and bcrypt.check_password_hash(user.password, password):
         expires = timedelta(days=30) if remember_me else timedelta(hours=1)
         token = create_access_token(identity=user.id, expires_delta=expires)
         return jsonify({"token": token, "role": user.role, "success": True}), 200
     else:
         return jsonify({"error": "Invalid email or password"}), 401
-
 @app.route("/login/phone", methods=["POST"])
 def login_user_phone():
     data = request.get_json()
@@ -722,11 +685,69 @@ class MakeSTKPush(Resource):
             return {
                 "success": False,
                 "message": "Sorry something went wrong please try again."
-            }, 400
+            }, 400@app.route("/birds", methods=["POST"])
+@admin_required
+def create_bird():
+    data = request.get_json()
+    new_bird = Bird(
+        name=data["name"],
+        species=data["species"],
+        color=data.get("color"),
+        age=data.get("age")
+    )
+    db.session.add(new_bird)
+    db.session.commit()
+    response = make_response(jsonify(new_bird_id=new_bird.id), 201)
+    return response
+
+@app.route("/birds", methods=["GET"])
+def get_all_birds():
+    try:
+        birds = Bird.query.all()
+        response = make_response(
+            jsonify([bird.to_dict() for bird in birds]), 200
+        )
+        return response
+    except Exception as e:
+        print(f"Error fetching birds: {str(e)}")
+        response = make_response(jsonify({"error": "Internal Server Error"}), 500)
+        return response
+
+@app.route("/birds/<int:bird_id>", methods=["GET"])
+def get_bird(bird_id):
+    bird = Bird.query.get_or_404(bird_id)
+    response = make_response(jsonify(bird.to_dict()), 200)
+    return response
+
+@app.route("/birds/<int:bird_id>", methods=["PUT"])
+@admin_required
+def update_bird(bird_id):
+    data = request.get_json()
+    bird = Bird.query.get_or_404(bird_id)
+    bird.name = data.get("name", bird.name)
+    bird.species = data.get("species", bird.species)
+    bird.color = data.get("color", bird.color)
+    bird.age = data.get("age", bird.age)
+    db.session.commit()
+    response = make_response(jsonify(message="Bird updated successfully"), 200)
+    return response
+
+@app.route("/birds/<int:bird_id>", methods=["DELETE"])
+@admin_required
+def delete_bird(bird_id):
+    bird = Bird.query.get_or_404(bird_id)
+    db.session.delete(bird)
+    db.session.commit()
+    response = make_response("", 204)
+    return response
 
 
 # stk push path [POST request to {baseURL}/stkpush]
 api.add_resource(MakeSTKPush, "/stkpush")
 
+if __name__ == "__main__":
+    app.run(debug=True)
 if __name__ == "_main_":
     app.run(debug=True, port=5000)
+    
+           
