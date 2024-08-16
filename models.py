@@ -1,10 +1,8 @@
-
-
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import MetaData, Enum
 from sqlalchemy.orm import validates, relationship
 from sqlalchemy_serializer import SerializerMixin
-from datetime import date ,timedelta,datetime
+from datetime import date, timedelta, datetime
 import enum
 
 # Metadata with naming convention for foreign keys
@@ -16,7 +14,6 @@ metadata = MetaData(
 
 db = SQLAlchemy(metadata=metadata)
 
-
 # User model
 class User(db.Model, SerializerMixin):
     __tablename__ = 'users'
@@ -27,15 +24,14 @@ class User(db.Model, SerializerMixin):
     password = db.Column(db.String(150), nullable=False)
     role = db.Column(db.String(50), nullable=False, default='customer')
     phone_number = db.Column(db.String(15), nullable=True)
-    
-    verification_code = db.Column(db.String(6), nullable=True)  # Adjust size as needed
+    verification_code = db.Column(db.String(6), nullable=True)
     is_verified = db.Column(db.Boolean, default=False)
 
-    # Adding relationships
-    orders = db.relationship('Order', back_populates='user' ,cascade="all, delete-orphan")
-    reviews = db.relationship('Review', back_populates='user',cascade="all, delete-orphan")
+    # Relationships
+    orders = db.relationship('Order', back_populates='user', cascade="all, delete-orphan")
+    reviews = db.relationship('Review', back_populates='user', cascade="all, delete-orphan")
 
-    # Adding serialization rules
+    # Serialization rules
     serialize_rules = ('-orders.user', '-reviews.user', '-password')
 
     @validates('email')
@@ -50,7 +46,7 @@ class User(db.Model, SerializerMixin):
             raise ValueError("Phone number must be between 10 and 15 characters")
         return value
 
-    def _repr_(self):
+    def __repr__(self):
         return f'<User id={self.id} name={self.name} email={self.email} role={self.role}>'
 
     def to_dict(self):
@@ -64,8 +60,6 @@ class User(db.Model, SerializerMixin):
             'is_verified': self.is_verified
         }
 
-
-
 # Product model
 class Product(db.Model, SerializerMixin):
     __tablename__ = 'products'
@@ -77,14 +71,14 @@ class Product(db.Model, SerializerMixin):
     image_url = db.Column(db.String(200), nullable=True)
     functionality = db.Column(db.Text, nullable=True)
     
-    # Adding relationships
-    order_products = db.relationship('OrderProduct', back_populates='product' ,cascade="all, delete-orphan")
-    reviews = db.relationship('Review', back_populates='product',cascade="all, delete-orphan")
+    # Relationships
+    order_products = db.relationship('OrderProduct', back_populates='product', cascade="all, delete-orphan")
+    reviews = db.relationship('Review', back_populates='product', cascade="all, delete-orphan")
 
-    # Adding serialization rules
+    # Serialization rules
     serialize_rules = ('-order_products.product', '-reviews.product')
 
-    def _repr_(self):
+    def __repr__(self):
         return f'<Product id={self.id} name={self.name} category={self.category} price={self.price}>'
 
     def to_dict(self):
@@ -96,13 +90,9 @@ class Product(db.Model, SerializerMixin):
             'stock_quantity': self.stock_quantity,
             'image_url': self.image_url,
             'functionality': self.functionality,
-             
-            
         }
 
-
 # Order model
-
 class OrderStatus(enum.Enum):
     PENDING = "Pending"
     SHIPPED = "Shipped"
@@ -116,13 +106,13 @@ class Order(db.Model, SerializerMixin):
     order_date = db.Column(db.Date, nullable=False, default=date.today)
     total_price = db.Column(db.Float, nullable=False)
     order_status = db.Column(Enum(OrderStatus), nullable=False, default=OrderStatus.PENDING)
-    delivery_date = db.Column(db.Date, nullable=True)  # Changed to Date
+    delivery_date = db.Column(db.Date, nullable=True)
 
-    # Adding relationships
-    order_products = db.relationship('OrderProduct', back_populates='order',cascade="all, delete-orphan")
+    # Relationships
+    order_products = db.relationship('OrderProduct', back_populates='order')
     user = db.relationship('User', back_populates='orders')
 
-    # Adding serialization rules
+    # Serialization rules
     serialize_rules = ('-order_products.order', '-user.orders', '-user.password')
 
     def __repr__(self):
@@ -132,7 +122,6 @@ class Order(db.Model, SerializerMixin):
         return {
             'id': self.id,
             'user_id': self.user_id,
-            'customer_name':self.user.name,
             'order_date': self.order_date,
             'total_price': self.total_price,
             'order_status': self.order_status.value,
@@ -141,10 +130,11 @@ class Order(db.Model, SerializerMixin):
         }
 
     @staticmethod
-    def calculate_delivery_date(order_date):
+    def calculate_delivery_date(order_date): 
         # Example: Set delivery date to 7 days after order_date
         delivery_date = order_date + timedelta(days=7)
-        return delivery_date  # Return the date directly
+        return delivery_date
+
 # Association table for Order-Product Many-to-Many relationship
 class OrderProduct(db.Model, SerializerMixin):
     __tablename__ = 'order_products'
@@ -153,14 +143,14 @@ class OrderProduct(db.Model, SerializerMixin):
     product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
 
-    # Adding relationships
+    # Relationships
     product = relationship('Product', back_populates='order_products')
     order = relationship('Order', back_populates='order_products')
 
-    # Adding serialization rules
+    # Serialization rules
     serialize_rules = ('-product.order_products', '-order.order_products')
 
-    def _repr_(self):
+    def __repr__(self):
         return f'<OrderProduct order_id={self.order_id} product_id={self.product_id} quantity={self.quantity}>'
 
     def to_dict(self):
@@ -168,9 +158,8 @@ class OrderProduct(db.Model, SerializerMixin):
             'order_id': self.order_id,
             'product_id': self.product_id,
             'quantity': self.quantity,
-            'product': self.product.to_dict(),  # Include product details for convenience
+            'product': self.product.to_dict(),
         }
-
 
 # Review model
 class Review(db.Model, SerializerMixin):
@@ -182,18 +171,18 @@ class Review(db.Model, SerializerMixin):
     rating = db.Column(db.Integer, nullable=False)
     review_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
-    # Adding relationships
+    # Relationships
     user = db.relationship('User', back_populates='reviews')
     product = db.relationship('Product', back_populates='reviews')
 
-    # Adding serialization rules
+    # Serialization rules
     serialize_rules = ('-user.reviews', '-product.reviews')
 
-    def _repr_(self):
+    def __repr__(self):
         return f'<Review id={self.id} user_id={self.user_id} product_id={self.product_id} rating={self.rating}>'
 
     def to_dict(self):
-          return {
+        return {
             "id": self.id,
             "user_id": self.user_id,
             "product_id": self.product_id,
@@ -201,3 +190,28 @@ class Review(db.Model, SerializerMixin):
             "rating": self.rating,
             "review_date": self.review_date.strftime('%Y-%m-%d')
         }
+
+# Bird model
+class Bird(db.Model, SerializerMixin):
+    __tablename__ = 'birds'
+    id = db.Column(db.Integer, primary_key=True, unique=True)
+    species = db.Column(db.String(100), nullable=False)
+    color = db.Column(db.String(50), nullable=True)
+    age = db.Column(db.Integer, nullable=True)
+    location = db.Column(db.String(100), nullable=True)
+
+    # Serialization rules
+    serialize_rules = ()
+
+    def __repr__(self):
+        return f'<Bird id={self.id} species={self.species} color={self.color} age={self.age}>'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'species': self.species,
+            'color': self.color,
+            'age': self.age,
+            'location': self.location
+        }
+
