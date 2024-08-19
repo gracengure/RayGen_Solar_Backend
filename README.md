@@ -82,7 +82,7 @@ To run the frontend locally, follow these steps:
 5. Open your browser and visit [http://localhost:5173] to view the application.
 
 ### Live Links 
-https://stalwart-liger-c0dba1.netlify.app/
+https://ray-gen-solar-frontend.vercel.app/
 
 https://raygen-solar-backend-jmfq.onrender.com
 
