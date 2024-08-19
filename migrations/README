@@ -1,7 +1,8 @@
-# RayGen Solar Solutions
+ (RayGen Solar Solutions Website)
 
-*Date:* 2024/08/15  
-*By:*  
+## Date: 2024/08/15  
+
+## By: 
 1. Grace Ngure  
 2. Charity Wanjiku  
 3. Victor Wahinya  
@@ -49,8 +50,8 @@ RayGen Solar Solutions web application includes the following features:
 - *Wireframes*: Figma (GUI-graphical user interface design)
 - *Frontend*: React
 - *Frontend Styling*: CSS/Bootstrap/MUI
-- *Testing*: Jest & pytest
-- *Deployment*: Render, AWS
+- *Testing*:  pytest
+- *Deployment*: Render, netlify
 
 ## Installation
 ### Backend
@@ -85,9 +86,6 @@ To run the frontend locally, follow these steps:
 For support or inquiries, please visit:  
 - Frontend Repository: [RayGen Solar Systems Frontend Repository](https://github.com/gracengure/RayGen-_Solar_Frontend)  
 - Backend Repository: [RayGen Solar Systems Backend Repository](https://github.com/gracengure/RayGen_Solar_Backend)
-
-## the Live link
-https://thriving-griffin-5a0831.netlify.app/
 
 ## License
 

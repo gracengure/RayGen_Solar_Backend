@@ -6,10 +6,11 @@ from datetime import date,timedelta
 from flask import Flask, request, make_response, jsonify
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from datetime import timedelta
 from flask_migrate import Migrate
 from flask_cors import CORS
 from functools import wraps
-from models import db, User, Product, Order, Review ,OrderStatus, Bird
+from models import db, User, Product, Order, Review ,OrderStatus
 from flask import Flask
 from flask_restful import Api, Resource, reqparse
 import datetime
@@ -17,31 +18,15 @@ import requests
 from requests.auth import HTTPBasicAuth
 import base64
 import json
-
-# from dotenv import load_dotenv
-from flask_mail import Mail, Message
-
+from flask_mail import Message ,Mail
+from flask import render_template_string
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DATABASE = os.environ.get("DB_URI", f"sqlite:///{os.path.join(BASE_DIR, 'solar_website.db')}")
-# DATABASE = os.environ.get ("DATABASE_URL")
-def get_mpesa_token():
-
-    consumer_key = 'YXZhAOLvjYqmX7TkAirasXHJfTjUHHqQtIOAGXYTLjjVfvUK'
-    consumer_secret = 'c6SpWnqqHckfRGGGKQt56LKdwIDrMQXeHlGs9PEiSbfGLLAmnbUjc7niS8olHtJ2'
-
-    api_URL = "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials"
-
-    # make a get request using python requests liblary
-    r = requests.get(api_URL, auth=HTTPBasicAuth(consumer_key, consumer_secret))
-
-    # return access_token from response
-    return r.json()['access_token']
-
 
 app = Flask(__name__)
 api = Api(app)
-app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE
+app.config["SQLALCHEMY_DATABASE_URI"] =DATABASE
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.json.compact = False
 app.config["JWT_SECRET_KEY"] = "super-secret"  
@@ -53,10 +38,10 @@ db.init_app(app)
 
 # load_dotenv()
 
-app.config['MAIL_SERVER']='sandbox.smtp.mailtrap.io'
-app.config['MAIL_PORT'] = 2525
-app.config['MAIL_USERNAME'] = 'cc6618a4c2436c'
-app.config['MAIL_PASSWORD'] = '8578432f236d9f'
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USERNAME'] = 'charitywanjiku8245@gmail.com'
+app.config['MAIL_PASSWORD'] = 'zmcs hkrq ohze xcxt' 
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
 mail = Mail(app)
@@ -81,16 +66,26 @@ def generate_verification_code():
 def send_email_verification(email, token):
     msg = Message(
         "Please verify your email",
-        sender="onesmusmwai40@gmail.com",  
+        sender="charitywanjiku8245@gmail.com",  
         recipients=[email]
     )
+    
+    # Create HTML content with the token in bold
+    html_body = render_template_string(
+        f"""
+        <p>Your verification code is: <strong>{token}</strong>.</p>
+        <p>Please use this code to verify your email address.</p>
+        """
+    )
+    
     msg.body = f"Your verification code is: {token}. Please use this code to verify your email address."
+    msg.html = html_body
+    
     try:
         mail.send(msg)
         print(f"Verification email sent to {email}.")
     except Exception as e:
         print(f"Failed to send email to {email}: {e}")
-
 
 @app.route("/")
 def index():
@@ -491,30 +486,7 @@ def verify_email():
         return jsonify({"error": "Invalid verification code or email."}), 400
 
 
-@app.route("/reviews", methods=["POST"])
-def create_review():
-    data = request.get_json()
-    
-    # Ensure the required fields are present
-    if not all(key in data for key in ("user_id", "product_id", "comments", "rating")):
-        return make_response(jsonify({"error": "Missing required fields"}), 400)
-    
-    # Create a new review instance
-    new_review = Review(
-        user_id=data["user_id"],
-        product_id=data["product_id"],
-        comments=data["comments"],
-        rating=data["rating"],
-        review_date=date.today()  # Or use data.get("review_date") if you want to accept date from request
-    )
-    
-    # Add and commit the new review to the database
-    db.session.add(new_review)
-    db.session.commit()
-    
-    # Return the newly created review's ID as part of the response
-    response = make_response(jsonify(new_review_id=new_review.id), 201)
-    return response
+
 @app.route('/reviews/<int:review_id>', methods=['DELETE'])
 def delete_review(review_id):
     review = Review.query.get_or_404(review_id)
@@ -685,66 +657,27 @@ class MakeSTKPush(Resource):
             return {
                 "success": False,
                 "message": "Sorry something went wrong please try again."
-            }, 400@app.route("/birds", methods=["POST"])
-@admin_required
-def create_bird():
-    data = request.get_json()
-    new_bird = Bird(
-        name=data["name"],
-        species=data["species"],
-        color=data.get("color"),
-        age=data.get("age")
-    )
-    db.session.add(new_bird)
-    db.session.commit()
-    response = make_response(jsonify(new_bird_id=new_bird.id), 201)
-    return response
-
-@app.route("/birds", methods=["GET"])
-def get_all_birds():
-    try:
-        birds = Bird.query.all()
-        response = make_response(
-            jsonify([bird.to_dict() for bird in birds]), 200
-        )
-        return response
-    except Exception as e:
-        print(f"Error fetching birds: {str(e)}")
-        response = make_response(jsonify({"error": "Internal Server Error"}), 500)
-        return response
-
-@app.route("/birds/<int:bird_id>", methods=["GET"])
-def get_bird(bird_id):
-    bird = Bird.query.get_or_404(bird_id)
-    response = make_response(jsonify(bird.to_dict()), 200)
-    return response
-
-@app.route("/birds/<int:bird_id>", methods=["PUT"])
-@admin_required
-def update_bird(bird_id):
-    data = request.get_json()
-    bird = Bird.query.get_or_404(bird_id)
-    bird.name = data.get("name", bird.name)
-    bird.species = data.get("species", bird.species)
-    bird.color = data.get("color", bird.color)
-    bird.age = data.get("age", bird.age)
-    db.session.commit()
-    response = make_response(jsonify(message="Bird updated successfully"), 200)
-    return response
-
-@app.route("/birds/<int:bird_id>", methods=["DELETE"])
-@admin_required
-def delete_bird(bird_id):
-    bird = Bird.query.get_or_404(bird_id)
-    db.session.delete(bird)
-    db.session.commit()
-    response = make_response("", 204)
-    return response
+            }, 400
 
 
 # stk push path [POST request to {baseURL}/stkpush]
 api.add_resource(MakeSTKPush, "/stkpush")
 
+
+@app.route('/products/search', methods=['GET'])
+def search_by_products():
+    query = request.args.get('name', '')
+    category = request.args.get('category', '')  # Get category from query parameters
+
+    # Filter products by name and category (if provided)
+    products_query = Product.query.filter(Product.name.ilike(f'%{query}%'))
+    
+    if category:
+        products_query = products_query.filter(Product.category.ilike(f'%{category}%'))
+
+    products = products_query.all()
+    
+    return jsonify([product.to_dict() for product in products])
 if __name__ == "__main__":
     app.run(debug=True)
 if __name__ == "_main_":

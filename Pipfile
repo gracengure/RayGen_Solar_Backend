@@ -13,6 +13,7 @@ flask-cors = "*"
 flask-jwt-extended = "*"
 flask-bcrypt = "*"
 sendgrid = "*"
+gunicorn = "*"
 
 [dev-packages]
 

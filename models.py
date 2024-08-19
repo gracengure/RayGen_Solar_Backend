@@ -122,6 +122,7 @@ class Order(db.Model, SerializerMixin):
         return {
             'id': self.id,
             'user_id': self.user_id,
+            'customer_name':self.user.name,
             'order_date': self.order_date,
             'total_price': self.total_price,
             'order_status': self.order_status.value,
@@ -189,29 +190,5 @@ class Review(db.Model, SerializerMixin):
             "comments": self.comments,
             "rating": self.rating,
             "review_date": self.review_date.strftime('%Y-%m-%d')
-        }
-
-# Bird model
-class Bird(db.Model, SerializerMixin):
-    __tablename__ = 'birds'
-    id = db.Column(db.Integer, primary_key=True, unique=True)
-    species = db.Column(db.String(100), nullable=False)
-    color = db.Column(db.String(50), nullable=True)
-    age = db.Column(db.Integer, nullable=True)
-    location = db.Column(db.String(100), nullable=True)
-
-    # Serialization rules
-    serialize_rules = ()
-
-    def __repr__(self):
-        return f'<Bird id={self.id} species={self.species} color={self.color} age={self.age}>'
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'species': self.species,
-            'color': self.color,
-            'age': self.age,
-            'location': self.location
         }
 
